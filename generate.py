@@ -32,35 +32,13 @@ INTERESSI = (
     "X-Plane e flight simulation, prezzi e novità di RAM/GPU/CPU, "
     "Roblox, Minecraft, tennis"
 )
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 MAX_PER_FEED = 8
 ORE_RECENTI = 40
 # ------------------------------------------------------------------------
 
 TZ = ZoneInfo("Europe/Rome")
 
-def scegli_modello():
-    if os.environ.get("GEMINI_MODEL"):
-        return os.environ["GEMINI_MODEL"]
-    r = requests.get(
-        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100",
-        headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-        timeout=30,
-    )
-    r.raise_for_status()
-    nomi = [
-        m["name"].split("/")[-1]
-        for m in r.json().get("models", [])
-        if "generateContent" in m.get("supportedGenerationMethods", [])
-    ]
-    print("Modelli disponibili:", nomi)
-    brutti = ("image", "tts", "live", "audio", "embedding", "robotics", "computer", "exp")
-    buoni = [n for n in nomi if "flash" in n and not any(b in n for b in brutti)]
-    buoni.sort(key=lambda n: ("lite" not in n, "preview" in n, n))
-    if not buoni:
-        raise RuntimeError("Nessun modello Flash trovato")
-    print("Uso il modello:", buoni[0])
-    return buoni[0]
 
 def fetch_articles():
     limite = datetime.now(timezone.utc) - timedelta(hours=ORE_RECENTI)
@@ -76,13 +54,14 @@ def fetch_articles():
                 t = e.get("published_parsed") or e.get("updated_parsed")
                 if t and datetime(*t[:6], tzinfo=timezone.utc) < limite:
                     continue
-                testo = re.sub(r"<[^>]+>", " ", e.get("summary", ""))
+                grezzo = e["content"][0]["value"] if e.get("content") else e.get("summary", "")
+                testo = re.sub(r"<[^>]+>", " ", grezzo)
                 articoli.append({
                     "id": len(articoli),
                     "sezione": sezione,
                     "fonte": feed.feed.get("title", url)[:40],
                     "titolo": e.get("title", "").strip(),
-                    "testo": " ".join(testo.split())[:300],
+                    "testo": " ".join(testo.split())[:900],
                     "link": e.get("link", ""),
                 })
     return articoli
@@ -95,7 +74,8 @@ def chiedi_a_gemini(articoli):
     prompt = f"""Sei il direttore di un piccolo giornale personale per un ragazzo italiano appassionato di: {INTERESSI}.
 Qui sotto trovi gli articoli di oggi, ognuno con un [id]. Scegli solo i più interessanti
 (massimo 4 per sezione, salta doppioni e roba banale) e scrivi per ognuno un riassunto
-di 1-2 frasi in italiano, chiaro e diretto. Usa SOLO informazioni presenti negli articoli.
+di 3-4 frasi (circa 60-90 parole) in italiano, chiaro e coinvolgente, con i dettagli concreti (numeri, nomi, date).
+Ordina le sezioni e gli articoli per importanza: il primo articolo del primo blocco sarà la notizia di apertura. Usa SOLO informazioni presenti negli articoli.
 Rispondi SOLO con JSON in questo formato:
 {{"editoriale": "2 frasi che riassumono la giornata",
   "sezioni": [{{"nome": "...", "articoli": [{{"id": 0, "titolo": "titolo in italiano", "riassunto": "..."}}]}}]}}
@@ -103,7 +83,7 @@ Rispondi SOLO con JSON in questo formato:
 ARTICOLI:
 {elenco}"""
     r = requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
         headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
         json={
             "contents": [{"parts": [{"text": prompt}]}],
@@ -132,6 +112,54 @@ def e(s):
     return html.escape(str(s), quote=True)
 
 
+CSS = """
+:root{--bg:#eaf0f8;--card:#ffffff;--ink:#0c1a2e;--soft:#566882;--line:#d5dfec;--hero1:#0f3d91;--hero2:#1f7ae0;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;--serif:"Iowan Old Style",Georgia,"Times New Roman",serif}
+@media(prefers-color-scheme:dark){:root{--bg:#060d19;--card:#0e192b;--ink:#e8eef8;--soft:#8c9fba;--line:#1b2b45;--hero1:#0a2a63;--hero2:#1558b8}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:70px}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:17px/1.6 var(--serif);-webkit-text-size-adjust:100%}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:20}
+.top{position:relative;overflow:hidden;color:#fff;padding:calc(env(safe-area-inset-top,0px) + 26px) 20px 30px;
+background:linear-gradient(135deg,var(--hero1),var(--hero2))}
+.top::after{content:"";position:absolute;inset:0;background:
+repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 56px),
+repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 56px);
+mask-image:linear-gradient(to bottom,#000,transparent);-webkit-mask-image:linear-gradient(to bottom,#000,transparent);pointer-events:none}
+.top>div{position:relative;max-width:1040px;margin:0 auto}
+.top h1{margin:0;font:800 clamp(30px,6vw,46px)/1.05 var(--sans);letter-spacing:-.03em}
+.top .sub{margin:8px 0 0;font:15px var(--sans);opacity:.85}
+.top .ed{margin:18px 0 0;max-width:62ch;font:italic 19px/1.5 var(--serif);opacity:.95}
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:21;background:var(--bg);border-bottom:1px solid var(--line);
+display:flex;gap:8px;overflow-x:auto;padding:10px 16px;scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav a{flex:none;font:600 14px var(--sans);color:var(--ink);text-decoration:none;padding:7px 14px;border-radius:999px;
+border:1.5px solid var(--c);background:var(--card)}
+nav a:active,nav a:focus-visible{background:var(--c);color:#fff;outline:none}
+main{max-width:1040px;margin:0 auto;padding:22px 16px calc(env(safe-area-inset-bottom,0px) + 44px)}
+.lead{display:block;margin-bottom:34px;padding:24px 22px;border-radius:20px;color:#fff;text-decoration:none;
+background:linear-gradient(160deg,#0c1f44,#13448f);box-shadow:0 10px 30px -12px rgba(10,40,100,.6)}
+.lead .tag{font:600 14px var(--sans);opacity:.8}
+.lead h2{margin:8px 0 12px;font:800 clamp(25px,4.6vw,36px)/1.12 var(--sans);letter-spacing:-.02em}
+.lead p{margin:0 0 14px;font-size:18px;max-width:64ch;opacity:.95}
+.lead .go{font:700 15px var(--sans)}
+.grid{display:grid;gap:34px 28px;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
+section h2{display:flex;align-items:center;gap:10px;margin:0 0 14px;font:800 23px var(--sans);letter-spacing:-.02em}
+section h2::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--c);box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 25%,transparent)}
+section h2 span{margin-left:auto;font:600 13px var(--sans);color:var(--soft)}
+article{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--c);border-radius:6px 16px 16px 6px;padding:16px 18px;margin-bottom:14px}
+article h3{margin:0 0 8px;font:700 19px/1.3 var(--sans);letter-spacing:-.01em}
+article p{margin:0 0 12px}
+.meta{display:flex;justify-content:space-between;gap:12px;font:14px var(--sans);color:var(--soft)}
+.meta a{color:var(--c);font-weight:700;text-decoration:none}
+.meta a:hover,.meta a:focus-visible{text-decoration:underline}
+footer{text-align:center;padding:0 16px 30px;font:13px var(--sans);color:var(--soft)}
+"""
+
+COLORI = ["#2f7bf5", "#e8960c", "#18a57a", "#e5484d", "#8b5cf6", "#d946a8"]
+
+
 def render(dati, articoli):
     per_id = {a["id"]: a for a in articoli}
     giorni = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
@@ -140,50 +168,53 @@ def render(dati, articoli):
     ora = datetime.now(TZ)
     data = f"{giorni[ora.weekday()]} {ora.day} {mesi[ora.month - 1]} {ora.year}"
 
-    blocchi = []
+    sezioni = []
     for s in dati.get("sezioni", []):
         voci = []
         for art in s.get("articoli", []):
             orig = per_id.get(art.get("id"))
-            if not orig:
-                continue
-            riass = f'<p>{e(art.get("riassunto", ""))}</p>' if art.get("riassunto") else ""
-            voci.append(
-                f'<article><h3><a href="{e(orig["link"])}">{e(art.get("titolo") or orig["titolo"])}</a></h3>'
-                f'{riass}<small>{e(orig["fonte"])}</small></article>'
-            )
+            if orig:
+                voci.append({"titolo": art.get("titolo") or orig["titolo"],
+                             "riass": art.get("riassunto", ""),
+                             "fonte": orig["fonte"], "link": orig["link"]})
         if voci:
-            blocchi.append(f'<section><h2>{e(s.get("nome", ""))}</h2>{"".join(voci)}</section>')
+            sezioni.append({"nome": s.get("nome", ""), "voci": voci})
 
-    corpo = "".join(blocchi) or "<p>Nessuna notizia nuova oggi.</p>"
+    hero = ""
+    if sezioni:
+        v = sezioni[0]["voci"].pop(0)
+        hero = (f'<a class="lead" href="{e(v["link"])}"><span class="tag">{e(sezioni[0]["nome"])} · notizia di apertura</span>'
+                f'<h2>{e(v["titolo"])}</h2><p>{e(v["riass"])}</p><span class="go">Leggi l’articolo su {e(v["fonte"])} →</span></a>')
+        if not sezioni[0]["voci"]:
+            sezioni.pop(0)
+
+    nav, blocchi = [], []
+    for i, s in enumerate(sezioni):
+        c = COLORI[i % len(COLORI)]
+        sid = f"s{i}"
+        nav.append(f'<a href="#{sid}" style="--c:{c}">{e(s["nome"])}</a>')
+        arts = "".join(
+            f'<article><h3>{e(v["titolo"])}</h3><p>{e(v["riass"])}</p>'
+            f'<div class="meta"><span>{e(v["fonte"])}</span><a href="{e(v["link"])}">Leggi tutto</a></div></article>'
+            for v in s["voci"])
+        blocchi.append(f'<section id="{sid}" style="--c:{c}"><h2>{e(s["nome"])}<span>{len(s["voci"])}</span></h2>{arts}</section>')
+
+    corpo = f'<div class="grid">{"".join(blocchi)}</div>' if blocchi else "<p>Nessuna notizia nuova oggi.</p>"
     return f"""<!DOCTYPE html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Giornale">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f3d91">
 <title>Il Giornale di Nicco</title>
-<style>
-:root{{--bg:#eef2f7;--card:#fff;--ink:#0e1a2b;--soft:#52627a;--line:#d3dbe6;--accent:#1f5fe0;--head:#0e1a2b;--headink:#eef2f7;
-box-sizing:border-box;padding-bottom:env(safe-area-inset-bottom,0px)}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#08101c;--card:#101c2e;--ink:#e6edf7;--soft:#8fa1ba;--line:#1d2c44;--accent:#6ea0ff;--head:#050a12;--headink:#e6edf7}}}}
-*{{box-sizing:border-box}}
-html,body{{margin:0}}
-body{{background:var(--bg);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}}
-header{{background:var(--head);color:var(--headink);padding:calc(env(safe-area-inset-top,0px) + 22px) 20px 20px}}
-header h1{{margin:0;font:800 30px/1.1 "Helvetica Neue",Arial,sans-serif;letter-spacing:-.02em}}
-header .data{{margin:4px 0 0;font:14px "Helvetica Neue",Arial,sans-serif;opacity:.7}}
-main{{max-width:680px;margin:0 auto;padding:18px 16px 40px}}
-.edit{{border-left:4px solid var(--accent);padding:2px 0 2px 14px;margin:6px 0 26px;font-style:italic}}
-section{{margin-bottom:28px}}
-h2{{font:700 20px "Helvetica Neue",Arial,sans-serif;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid var(--accent)}}
-article{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px}}
-h3{{margin:0 0 4px;font:700 18px/1.3 "Helvetica Neue",Arial,sans-serif}}
-h3 a{{color:inherit;text-decoration:none}} h3 a:focus-visible,h3 a:hover{{color:var(--accent);text-decoration:underline}}
-article p{{margin:4px 0 8px}} small{{color:var(--soft);font:13px "Helvetica Neue",Arial,sans-serif}}
-</style></head><body>
-<header><h1>Il Giornale di Nicco</h1><p class="data">{data}</p></header>
-<main><p class="edit">{e(dati.get("editoriale", ""))}</p>{corpo}</main>
+<style>{CSS}</style></head><body>
+<header class="top"><div><h1>Il Giornale di Nicco</h1>
+<p class="sub">{data} · aggiornato alle {ora.strftime("%H:%M")}</p>
+<p class="ed">{e(dati.get("editoriale", ""))}</p></div></header>
+<nav>{"".join(nav)}</nav>
+<main>{hero}{corpo}</main>
+<footer>Riassunti scritti da un’AI: per i dettagli apri l’articolo originale.</footer>
 </body></html>"""
 
 
