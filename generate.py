@@ -103,7 +103,7 @@ Rispondi SOLO con JSON in questo formato:
 ARTICOLI:
 {elenco}"""
     r = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{scegli_modello()}:generateContent",,
+        f"https://generativelanguage.googleapis.com/v1beta/models/{scegli_modello()}:generateContent",
         headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
         json={
             "contents": [{"parts": [{"text": prompt}]}],
