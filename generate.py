@@ -39,6 +39,28 @@ ORE_RECENTI = 40
 
 TZ = ZoneInfo("Europe/Rome")
 
+def scegli_modello():
+    if os.environ.get("GEMINI_MODEL"):
+        return os.environ["GEMINI_MODEL"]
+    r = requests.get(
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100",
+        headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+        timeout=30,
+    )
+    r.raise_for_status()
+    nomi = [
+        m["name"].split("/")[-1]
+        for m in r.json().get("models", [])
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+    ]
+    print("Modelli disponibili:", nomi)
+    brutti = ("image", "tts", "live", "audio", "embedding", "robotics", "computer", "exp")
+    buoni = [n for n in nomi if "flash" in n and not any(b in n for b in brutti)]
+    buoni.sort(key=lambda n: ("lite" not in n, "preview" in n, n))
+    if not buoni:
+        raise RuntimeError("Nessun modello Flash trovato")
+    print("Uso il modello:", buoni[0])
+    return buoni[0]
 
 def fetch_articles():
     limite = datetime.now(timezone.utc) - timedelta(hours=ORE_RECENTI)
@@ -81,7 +103,7 @@ Rispondi SOLO con JSON in questo formato:
 ARTICOLI:
 {elenco}"""
     r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{scegli_modello()}:generateContent",,
         headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
         json={
             "contents": [{"parts": [{"text": prompt}]}],
