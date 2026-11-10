@@ -33,6 +33,7 @@ INTERESSI = (
     "Roblox, Minecraft, tennis"
 )
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
+MODELLI = [MODEL, "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
 MAX_PER_FEED = 8
 ORE_RECENTI = 40
 # ------------------------------------------------------------------------
@@ -82,18 +83,35 @@ Rispondi SOLO con JSON in questo formato:
 
 ARTICOLI:
 {elenco}"""
-    r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
-        headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-        json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3},
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    testo = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(testo)
+    corpo = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3},
+    }
+    ultimo_errore = None
+    for modello in dict.fromkeys(MODELLI):
+        for tentativo in range(3):
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent",
+                    headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+                    json=corpo,
+                    timeout=120,
+                )
+                if r.status_code in (429, 500, 502, 503, 504):
+                    raise RuntimeError(f"{r.status_code} su {modello} (tentativo {tentativo + 1})")
+                r.raise_for_status()
+                testo = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                print(f"Riassunto fatto con {modello}")
+                return json.loads(testo)
+            except RuntimeError as ex:  # server occupato: riprova dopo una pausa
+                ultimo_errore = ex
+                print(ex, file=sys.stderr)
+                time.sleep(10 * (tentativo + 1))
+            except Exception as ex:  # modello non valido o risposta strana: passa al prossimo
+                ultimo_errore = ex
+                print(f"{modello}: {ex}", file=sys.stderr)
+                break
+    raise RuntimeError(f"Tutti i modelli hanno fallito: {ultimo_errore}")
 
 
 def fallback(articoli):
